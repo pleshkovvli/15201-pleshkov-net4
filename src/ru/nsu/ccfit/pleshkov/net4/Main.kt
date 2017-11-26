@@ -30,8 +30,8 @@ fun main(args: Array<String>) {
 
     val buf = ByteArray(100)
 
-    socket.recv(buf, 0 , 4)
+    socket.recv(buf, 0, 5)
 
-    println(String(buf))
+    println(String(buf.copyOfRange(0, 5)))
 
 }

@@ -11,13 +11,14 @@ import java.util.*
 
 const val MAX_PAYLOAD_SIZE = 400
 const val INT_SIZE = 4
-const val SERVICE_BUFFER_SIZE = INT_SIZE * 3
-const val MESSAGE_BUFFER_SIZE = INT_SIZE * 3 + MAX_PAYLOAD_SIZE
+const val SERVICE_BUFFER_SIZE = INT_SIZE * 4
+const val MESSAGE_BUFFER_SIZE = INT_SIZE * 4 + MAX_PAYLOAD_SIZE
 
 enum class UDPStreamState {
     NOT_CONNECTED,
     LISTENING,
     SYN_SENT,
+    SYN_ACK_SENT,
     CONNECTED,
     FIN_WAIT,
     CLOSE_WAIT,
@@ -98,10 +99,11 @@ fun ByteArray.toMessage() : Message {
             else SynAckMessage(seqNumber, ackNumber)
             MessageType.ACK -> AckMessage(seqNumber, ackNumber)
             MessageType.DATA -> {
-                val data = if(dataLength > 0) {
-                    inputStream.readBytes(dataLength)
+                if(dataLength > 0) {
+                    val data = ByteArray(dataLength)
+                    inputStream.read(data, 0, dataLength)
+                    DataMessage(seqNumber, ackNumber, data)
                 } else throw BadBytesException("dataLength", dataLength)
-                DataMessage(seqNumber, ackNumber, data)
             }
             MessageType.FIN -> FinMessage(seqNumber, ackNumber)
         }

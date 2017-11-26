@@ -1,9 +1,11 @@
 package ru.nsu.ccfit.pleshkov.net4.sockets
 
+import ru.nsu.ccfit.pleshkov.net4.MessagesHandler
 import ru.nsu.ccfit.pleshkov.net4.messages.*
 import java.io.Closeable
 import java.net.*
 import java.util.*
+import java.util.concurrent.ArrayBlockingQueue
 
 open class UDPStreamSocketException(message: String) : Exception(message)
 
@@ -13,11 +15,10 @@ class UDPStreamSocketTimeoutException(reason: String)
 
 const val INIT_ACK = -1
 
-const val TIME_TO_CONNECT_MS = 5000
+const val TIME_TO_CONNECT_MS = 10000
 
 
 class UDPStreamSocket : Closeable {
-
     private val handler: UDPStreamRoutineHandler
     internal val udpSocket: DatagramSocket
 
@@ -26,13 +27,16 @@ class UDPStreamSocket : Closeable {
         handler = ClientRoutineHandler(this)
     }
 
-    constructor(udpSocket: DatagramSocket, handler: UDPStreamRoutineHandler) {
+    constructor(udpSocket: DatagramSocket, handler: UDPStreamRoutineHandler, remote: SocketAddress) {
         this.udpSocket = udpSocket.apply { soTimeout = TIMEOUT_MS }
         this.handler = handler
+        this.remoteAddress = remote as InetSocketAddress
     }
 
     private val recvBuffer = RecvRingBuffer(DEFAULT_BUFFER_SIZE)
     private val sendBuffer = SendRingBuffer(DEFAULT_BUFFER_SIZE)
+
+    internal val serviceMessages = ArrayBlockingQueue<Message>(50)
 
     private var seqNumber: Int = Random().nextInt()
     private var otherAck: Int = INIT_ACK
@@ -46,11 +50,18 @@ class UDPStreamSocket : Closeable {
 
     private var remoteAddress: InetSocketAddress? = null
 
-    override fun close() {
-        val fin = FinMessage(++seqNumber, ackNumber)
-        sendMessage(fin)
+    private val closeLock = java.lang.Object()
 
+    override fun close() = synchronized(closeLock) {
+        val fin = FinMessage(++seqNumber, ackNumber)
         state = UDPStreamState.FIN_WAIT
+        offerToSend(fin)
+
+        while (state != UDPStreamState.TIME_ACK) {
+            closeLock.wait()
+        }
+
+        handler.finish()
     }
 
     fun bind(address: InetSocketAddress) {
@@ -58,11 +69,13 @@ class UDPStreamSocket : Closeable {
     }
 
     fun connect(address: InetSocketAddress) {
-        if(state != UDPStreamState.NOT_CONNECTED) {
+        if (state != UDPStreamState.NOT_CONNECTED) {
             throw UDPStreamSocketException("Socket already connected")
         }
 
         remoteAddress = address
+
+        connectAction()
 
         handler.start()
     }
@@ -70,14 +83,14 @@ class UDPStreamSocket : Closeable {
     internal fun connectAction() {
         val timestamp = System.currentTimeMillis()
 
-        udpSocket.connect(remoteAddress)
+        //udpSocket.connect(remoteAddress)
 
         val syn = SynMessage(seqNumber)
 
         val synackBuffer = ByteArray(SERVICE_BUFFER_SIZE)
         val synack = DatagramPacket(synackBuffer, synackBuffer.size)
 
-        while (gotTimeToConnect(timestamp) && (state == UDPStreamState.NOT_CONNECTED)) {
+        while (gotTimeToConnect(timestamp) && (state != UDPStreamState.CONNECTED)) {
             try {
                 sendMessage(syn)
                 state = UDPStreamState.SYN_SENT
@@ -86,8 +99,10 @@ class UDPStreamSocket : Closeable {
             }
 
             try {
+                println(udpSocket.localSocketAddress)
                 udpSocket.receive(synack)
             } catch (e: SocketTimeoutException) {
+                println("CONNECTING: TIMEOUT")
                 continue
             }
 
@@ -98,18 +113,11 @@ class UDPStreamSocket : Closeable {
                 continue
             }
 
-            if (message.type == MessageType.SYN && message.ackNumber == (seqNumber + 1)) {
-                ++seqNumber
-
-                ackNumber = message.seqNumber + 1
-                otherAck = message.ackNumber
-
-                state = UDPStreamState.CONNECTED
-
-                val ack = AckMessage(seqNumber, ackNumber)
+            if (message is SynAckMessage) {
+                val ack = MessagesHandler().handleSynack(message) ?: continue
                 while (gotTimeToConnect(timestamp)) {
                     try {
-                        udpSocket.sendMessage(ack)
+                        sendMessage(ack)
                         break
                     } catch (e: SocketTimeoutException) {
                         continue
@@ -118,7 +126,7 @@ class UDPStreamSocket : Closeable {
             }
         }
 
-        if (state == UDPStreamState.NOT_CONNECTED) {
+        if (state != UDPStreamState.CONNECTED) {
             throw UDPStreamSocketTimeoutException("connect")
         }
     }
@@ -131,6 +139,15 @@ class UDPStreamSocket : Closeable {
         remoteAddress?.let {
             println("SENDED")
             udpSocket.send(message.toPacket(it))
+        }
+    }
+
+    fun offerToSend(message: Message) {
+        remoteAddress?.let {
+            println("SENDED")
+            serviceMessages.offer(message)
+
+            handler.notifySended(this)
         }
     }
 
@@ -147,6 +164,7 @@ class UDPStreamSocket : Closeable {
 
     fun sendAgain() {
         sendBuffer.dropBufferOffset()
+        handler.notifySended(this)
     }
 
     private fun renewAck(message: Message) {
@@ -170,11 +188,23 @@ class UDPStreamSocket : Closeable {
         }
     }
 
-    internal fun handleData() {
-        val bytes = ByteArray(DEFAULT_BUFFER_SIZE)
+    internal fun checkService() {
+        var message: Message? = serviceMessages.poll()
+        while (message != null) {
+            sendMessage(message)
+            message = serviceMessages.poll()
+        }
+    }
 
-        val read = sendBuffer.read(bytes, 0, DEFAULT_BUFFER_SIZE)
-        if(read < 0) {
+    internal fun handleData() {
+        if (sendBuffer.availableBytes == 0) {
+            return
+        }
+
+        val bytes = ByteArray(MAX_PAYLOAD_SIZE)
+
+        val read = sendBuffer.read(bytes, 0, MAX_PAYLOAD_SIZE)
+        if (read < 0) {
             println("!!!! $read")
         }
         val dataMessage = DataMessage(seqNumber, ackNumber, ByteArray(read) { i -> bytes[i] })
@@ -190,61 +220,69 @@ class UDPStreamSocket : Closeable {
 
     internal fun handleMessage(message: Message) = when (message.type) {
         MessageType.SYN -> {
-            val ack = AckMessage(seqNumber, ackNumber)
-            sendMessage(ack)
+            handleSyn(message as SynMessage)
         }
         MessageType.ACK -> {
+            if (state == UDPStreamState.SYN_ACK_SENT) {
+                state = UDPStreamState.CONNECTED
+            }
             renewAck(message)
         }
         MessageType.DATA -> run {
-            renewAck(message)
-
-            println("SEQ=${message.seqNumber} ACK=$ackNumber")
-
-            if (message.seqNumber < ackNumber) {
-                val ack = AckMessage(seqNumber, ackNumber)
-                sendMessage(ack)
-                return
-            }
-
-            if (message.seqNumber > ackNumber) {
-                return
-            }
-
-            val data = message.data ?: return
-
-            println("WRITTEN")
-            val written = recvBuffer.write(data, 0, data.size)
-            ackNumber += written
-
-            val ack = AckMessage(seqNumber, ackNumber)
-            sendMessage(ack)
+            handleDataMessage(message)
         }
         MessageType.FIN -> {
             renewAck(message)
 
-            if (state == UDPStreamState.CONNECTED) {
-                state = UDPStreamState.CLOSE_WAIT
-            }
-            if (state == UDPStreamState.FIN_WAIT) {
-                state = UDPStreamState.TIME_ACK
-            }
+            handleFin()
 
             val ack = AckMessage(seqNumber, ++ackNumber)
-            try {
-                sendMessage(ack)
-            } catch (e: SocketTimeoutException) {
-            }
+            offerToSend(ack)
         }
     }
-}
 
-fun Message.toPacket(address: SocketAddress): DatagramPacket {
-    //try {
-        val bytes = this.toBytes()
-        return DatagramPacket(bytes, bytes.size, address)
-//    } catch (e: NegativeArraySizeException) {
-//        println("$type $dataLength")
-//        throw e
-//    }
+    private fun handleFin() {
+        if (state == UDPStreamState.CONNECTED) {
+            state = UDPStreamState.CLOSE_WAIT
+        }
+
+        if (state == UDPStreamState.FIN_WAIT) {
+            state = UDPStreamState.TIME_ACK
+        }
+    }
+
+    private fun handleDataMessage(message: Message) {
+        renewAck(message)
+
+        if (message.seqNumber < ackNumber) {
+            val ack = AckMessage(seqNumber, ackNumber)
+            offerToSend(ack)
+            //return
+        }
+
+        if (message.seqNumber > ackNumber) {
+            //return
+        }
+
+        val data = message.data ?: ByteArray(2)
+
+        println("WRITTEN")
+        val written = recvBuffer.write(data, 0, data.size)
+        ackNumber += written
+
+        val ack = AckMessage(seqNumber, ackNumber)
+        offerToSend(ack)
+    }
+
+    private fun handleSyn(message: SynMessage) {
+        if (state == UDPStreamState.NOT_CONNECTED) {
+            ackNumber = message.seqNumber + 1
+            val synackMessage = SynAckMessage(seqNumber, ackNumber)
+            state = UDPStreamState.SYN_ACK_SENT
+            offerToSend(synackMessage)
+        } else {
+            val ack = AckMessage(seqNumber, ackNumber)
+            offerToSend(ack)
+        }
+    }
 }

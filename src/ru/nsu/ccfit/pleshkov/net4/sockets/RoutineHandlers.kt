@@ -12,8 +12,9 @@ const val TIMEOUT_MS = 1000
 
 abstract class UDPStreamRoutineHandler {
     private lateinit var recvRoutine: Thread
-
     private lateinit var sendRoutine: Thread
+
+    protected var timeClose: Long = 0
 
     open fun start() {
         sendRoutine = thread {
@@ -27,31 +28,42 @@ abstract class UDPStreamRoutineHandler {
                 receivingRoutine()
             }
         }
-
-        //sendRoutine.start()
-        //recvRoutine.start()
     }
 
     protected abstract fun sendingRoutine()
     protected abstract fun receivingRoutine()
 
-
     abstract fun notifySended(sock: UDPStreamSocket)
     abstract fun notifyReceived()
 
     open fun finish() {
+        timeClose = System.currentTimeMillis()
+    }
+
+    protected fun finishThreads() {
         sendRoutine.interrupt()
         recvRoutine.interrupt()
     }
 }
 
 class ClientRoutineHandler(private val socket: UDPStreamSocket) : UDPStreamRoutineHandler() {
-    override fun sendingRoutine() {
-        socket.checkFin()
+    private val sendLock = java.lang.Object()
+    private var checkSend: Boolean = false
+
+    override fun sendingRoutine() = synchronized(sendLock) {
+        while (!checkSend) {
+            sendLock.wait()
+        }
+        checkSend = false
+        socket.checkService()
         socket.handleData()
+        socket.checkFin()
     }
 
-    override fun notifySended(sock: UDPStreamSocket) {}
+    override fun notifySended(sock: UDPStreamSocket) = synchronized(sendLock) {
+        checkSend = true
+        sendLock.notifyAll()
+    }
 
     override fun notifyReceived() {}
 
@@ -83,8 +95,9 @@ class ClientRoutineHandler(private val socket: UDPStreamSocket) : UDPStreamRouti
 class ServerRoutineHandler(private val socket: UDPStreamServerSocket) : UDPStreamRoutineHandler() {
     override fun sendingRoutine()  {
         val sock = socket.sendingQueue.take()
-        sock.checkFin()
+        sock.checkService()
         sock.handleData()
+        sock.checkFin()
     }
 
     override fun notifySended(sock: UDPStreamSocket) {
@@ -103,6 +116,11 @@ class ServerRoutineHandler(private val socket: UDPStreamServerSocket) : UDPStrea
 
         val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
         val packet = DatagramPacket(bytes, bytes.size)
+
+        if(timeClose > 0 && (System.currentTimeMillis() - timeClose) > 2 * TIMEOUT_MS) {
+            finishThreads()
+            return
+        }
 
         try {
             socket.udpSocket.receive(packet)
@@ -123,7 +141,8 @@ class ServerRoutineHandler(private val socket: UDPStreamServerSocket) : UDPStrea
             println("HANDLING")
             client.handleMessage(message)
         } else {
-            val newClient = UDPStreamSocket(socket.udpSocket, this)
+            val newClient = UDPStreamSocket(socket.udpSocket, this, packet.socketAddress)
+            newClient.handleMessage(message)
             val added = socket.acceptingQueue.add(newClient)
             println("added: $added")
             socket.clientSockets.put(packet.socketAddress as InetSocketAddress, newClient)
