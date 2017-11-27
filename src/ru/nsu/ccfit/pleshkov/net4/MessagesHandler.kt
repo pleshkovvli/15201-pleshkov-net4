@@ -1,15 +1,17 @@
 package ru.nsu.ccfit.pleshkov.net4
 
 import ru.nsu.ccfit.pleshkov.net4.messages.*
-import ru.nsu.ccfit.pleshkov.net4.sockets.INIT_ACK
 import ru.nsu.ccfit.pleshkov.net4.sockets.RecvRingBuffer
 import ru.nsu.ccfit.pleshkov.net4.sockets.SendRingBuffer
-import ru.nsu.ccfit.pleshkov.net4.sockets.TIMEOUT_MS
+import java.net.InetSocketAddress
 import java.util.*
+import java.util.concurrent.ArrayBlockingQueue
+
+const val INIT_ACK = -1
 
 class MessagesHandler {
-    private val recvBuffer = RecvRingBuffer(DEFAULT_BUFFER_SIZE)
-    private val sendBuffer = SendRingBuffer(DEFAULT_BUFFER_SIZE)
+    private val recvBuffer = RecvRingBuffer(8)
+    private val sendBuffer = SendRingBuffer(8)
 
     private var seqNumber: Int = Random().nextInt()
     private var otherAck: Int = INIT_ACK
@@ -20,8 +22,12 @@ class MessagesHandler {
 
     internal var state: UDPStreamState = UDPStreamState.NOT_CONNECTED
 
+    private val stateLock = java.lang.Object()
+
     val connected: Boolean
         get() = (state == UDPStreamState.CONNECTED)
+
+    val serviceMessages = ArrayBlockingQueue<Message>(10)
 
     fun initSynMessage() = SynMessage(seqNumber)
 
@@ -31,7 +37,7 @@ class MessagesHandler {
     fun recv(buf: ByteArray, offset: Int, length: Int) = recvBuffer.read(buf, offset, length)
 
     fun currentDataMessage() : DataMessage? {
-        if (sendBuffer.availableBytes == 0) {
+        if (!sendBuffer.dataAvailable) {
             return null
         }
 
@@ -45,20 +51,27 @@ class MessagesHandler {
 
     fun currentFinMessage() = FinMessage(seqNumber, ackNumber)
 
-    fun checkFin() : FinMessage? {
+    fun waitTimeAck() = synchronized(stateLock) {
+        while (state != UDPStreamState.TIME_ACK) {
+            stateLock.wait()
+        }
+    }
+
+    fun checkFin() : FinMessage? = synchronized(stateLock) {
         if (state == UDPStreamState.FIN_WAIT && otherAck <= seqNumber) {
             return FinMessage(seqNumber, ackNumber)
         }
 
         if (state == UDPStreamState.CLOSE_WAIT && sendBuffer.allBytesSent) {
             state = UDPStreamState.LAST_ACK
+            stateLock.notifyAll()
             return FinMessage(seqNumber, ackNumber)
         }
 
         return null
     }
 
-    fun handleMessage(message: Message) : Message {
+    fun handleMessage(message: Message) : Message? {
         var ack: Message? = null
         when(message) {
             is SynMessage -> {
@@ -70,6 +83,10 @@ class MessagesHandler {
         }
 
         renewAck(message)
+
+        if(message is AckMessage) {
+            return null
+        }
 
         return ack ?: AckMessage(seqNumber, ackNumber)
     }
@@ -101,6 +118,13 @@ class MessagesHandler {
     }
 
     fun handleAck(message: AckMessage) {
+        if(state == UDPStreamState.SYN_ACK_SENT) {
+            state = UDPStreamState.CONNECTED
+            otherAck = message.ackNumber
+            ackTimeStamp = System.currentTimeMillis()
+            return
+        }
+
         if (message.ackNumber <= otherAck) {
             return
         }
@@ -133,6 +157,7 @@ class MessagesHandler {
 
     fun checkResend() {
         if (System.currentTimeMillis() - ackTimeStamp > TIMEOUT_MS) {
+            ackTimeStamp = System.currentTimeMillis()
             val offset = sendBuffer.dropBufferOffset()
             seqNumber -= offset
         }

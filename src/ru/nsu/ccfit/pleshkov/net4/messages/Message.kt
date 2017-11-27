@@ -67,7 +67,6 @@ sealed class Message(
                 output.write(data)
             }
         }
-        println()
         return byteStream.toByteArray()
     }
 }
