@@ -10,8 +10,8 @@ import java.util.concurrent.ArrayBlockingQueue
 const val INIT_ACK = -1
 
 class MessagesHandler {
-    private val recvBuffer = RecvRingBuffer(8)
-    private val sendBuffer = SendRingBuffer(8)
+    private val recvBuffer = RecvRingBuffer(DEFAULT_BUFFER_SIZE)
+    private val sendBuffer = SendRingBuffer(DEFAULT_BUFFER_SIZE)
 
     private var seqNumber: Int = Random().nextInt()
     private var otherAck: Int = INIT_ACK
@@ -27,7 +27,7 @@ class MessagesHandler {
     val connected: Boolean
         get() = (state == UDPStreamState.CONNECTED)
 
-    val serviceMessages = ArrayBlockingQueue<Message>(10)
+    val serviceMessages = ArrayBlockingQueue<Message>(50)
     val available
         get() = recvBuffer.availableBytes
 
@@ -59,12 +59,18 @@ class MessagesHandler {
         }
     }
 
+    fun waitAllSent() = synchronized(stateLock) {
+        while (!allSent()) {
+            stateLock.wait()
+        }
+    }
+
     fun checkFin() : FinMessage? = synchronized(stateLock) {
         if (state == UDPStreamState.FIN_WAIT && otherAck <= seqNumber) {
             return FinMessage(seqNumber, ackNumber)
         }
 
-        if (state == UDPStreamState.CLOSE_WAIT && sendBuffer.allBytesSent) {
+        if (state == UDPStreamState.CLOSE_WAIT && allSent()) {
             state = UDPStreamState.LAST_ACK
             stateLock.notifyAll()
             return FinMessage(seqNumber, ackNumber)
@@ -73,6 +79,8 @@ class MessagesHandler {
         return null
     }
 
+    private fun allSent() = sendBuffer.allBytesSent
+
     fun handleMessage(message: Message) : Message? {
         var ack: Message? = null
         when(message) {
@@ -80,7 +88,10 @@ class MessagesHandler {
                 ack = handleSyn(message)
             }
             is AckMessage -> handleAck(message)
-            is DataMessage -> handleDataMessage(message)
+            is DataMessage -> {
+                println("Data received")
+                handleDataMessage(message)
+            }
             is FinMessage -> handleFin()
         }
 
@@ -134,6 +145,10 @@ class MessagesHandler {
         ackTimeStamp = System.currentTimeMillis()
         sendBuffer.confirmRead(message.ackNumber - otherAck)
         otherAck = message.ackNumber
+
+        synchronized(stateLock) {
+            stateLock.notifyAll()
+        }
 
     }
 

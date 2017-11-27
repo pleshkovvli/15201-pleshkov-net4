@@ -1,45 +1,66 @@
 package ru.nsu.ccfit.pleshkov.net4
 
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.net.InetAddress
 import kotlin.concurrent.thread
 
 fun main(args: Array<String>) {
 
+    val fileStr = "/home/pleshkovvli/Downloads/tsetup.1.1.23.tar.xz"
+
     thread {
         val socket = UDPStrSock(InetAddress.getLocalHost(), 3113)
-        while (true) {
-            val str = readLine() ?: continue
 
-            if(str == "END") {
-                break
-            }
+        socket.getOutputStream().use { outputStream ->
+            val file = File(fileStr)
+            val size = file.length()
+            FileInputStream(file).use { inputStream ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
 
-            val buf = str.toByteArray()
-            if(buf.size < 1) {
-                continue
+                var writtenBytes = 0
+                while (writtenBytes < size) {
+                    val rest = size - writtenBytes
+                    val bytesToRead = if(rest < DEFAULT_BUFFER_SIZE) rest
+                    else DEFAULT_BUFFER_SIZE.toLong()
+
+                    val readBytes = inputStream.read(buffer, 0, bytesToRead.toInt())
+                    outputStream.write(buffer, 0, readBytes)
+                    writtenBytes += readBytes
+                }
             }
-            val sended = socket.send(buf, 0, buf.size)
-            println("SENDED $sended")
         }
-
-        socket.close()
     }
 
 
     val udpStrServerSock = UDPStrServerSock(3113)
     udpStrServerSock.listen()
 
-    val sock = udpStrServerSock.accept()
+    val socket = udpStrServerSock.accept()
 
-    println("ACCEPTED")
-    try {
-        val buf = ByteArray(10000)
-        while (true) {
-            val recved = sock.recv(buf, 0, 10000)
-            println("RECVD: $recved")
-            println(String(buf.copyOfRange(0, recved)))
+    println("Accepted")
+
+    val size = File(fileStr).length()
+
+    socket.getInputStream().use { inputStream ->
+        val file = File("/home/pleshkovvli/net4out")
+
+        FileOutputStream(file).use { outputStream ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+
+            var writtenBytes = 0
+            while (writtenBytes < size) {
+                val rest = size - writtenBytes
+                val bytesToRead = if(rest < DEFAULT_BUFFER_SIZE) {
+                    rest
+                } else DEFAULT_BUFFER_SIZE.toLong()
+                val readBytes = inputStream.read(buffer, 0, bytesToRead.toInt())
+                outputStream.write(buffer, 0, readBytes)
+                writtenBytes += readBytes
+            }
         }
-    } catch (e: Exception) {
-        println("EXC: ${e.message}")
     }
+
+    Thread.sleep(10000)
 }

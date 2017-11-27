@@ -1,6 +1,8 @@
 package ru.nsu.ccfit.pleshkov.net4
 
 import java.io.Closeable
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 
@@ -12,6 +14,9 @@ class UDPStrSock : Closeable {
         this.handler = handler
         this.remote = remote
     }
+
+    fun getOutputStream() : OutputStream = UPDOutputStream(this)
+    fun getInputStream() : InputStream = UPDInputStream(this)
 
     constructor(address: InetAddress, port: Int) {
         handler = ClientRoutinesHandler()

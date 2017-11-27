@@ -25,6 +25,8 @@ class ServerRoutinesHandler : RoutinesHandler {
 
     fun accept() = acceptingQueue.take()
 
+    override fun available(remote: InetSocketAddress) = messagesHandlers[remote]?.available ?: -1
+
     private var state: UDPStreamState = UDPStreamState.NOT_CONNECTED
 
     fun listen() {
@@ -72,7 +74,7 @@ class ServerRoutinesHandler : RoutinesHandler {
             val state = handler.state
             val ack = handler.handleMessage(message)
             ack?.let {
-                handler.serviceMessages.add(it)
+                handler.serviceMessages.offer(it)
             }
             sendingHandlers.put(remote)
             if(state == UDPStreamState.SYN_ACK_SENT && handler.state == UDPStreamState.CONNECTED) {

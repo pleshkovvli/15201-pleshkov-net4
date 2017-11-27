@@ -10,7 +10,7 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
     private val buffer = ByteArray(maxSize)
     open protected var begin = 0
     var availableBytes = 0
-        private set
+        protected set
 
     val dataAvailable
         get() = availableBytes > 0
@@ -124,6 +124,7 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
     fun dropBufferOffset() = synchronized(lock) {
         val offsetWas = bufOffset
         begin = (begin + maxSize - bufOffset) % maxSize
+        availableBytes += bufOffset
         bufOffset = 0
         lock.notifyAll()
         offsetWas

@@ -9,7 +9,7 @@ import java.net.DatagramSocket
 import java.net.SocketAddress
 import java.util.*
 
-const val MAX_PAYLOAD_SIZE = 400
+const val MAX_PAYLOAD_SIZE = 200
 const val INT_SIZE = 4
 const val SERVICE_BUFFER_SIZE = INT_SIZE * 4
 const val MESSAGE_BUFFER_SIZE = INT_SIZE * 4 + MAX_PAYLOAD_SIZE

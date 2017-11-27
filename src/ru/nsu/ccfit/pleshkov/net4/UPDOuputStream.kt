@@ -12,17 +12,21 @@ class UPDOutputStream(private val socket: UDPStrSock) : OutputStream() {
 
     override fun write(bytes: ByteArray?) {
         bytes!!
-        socket.send(bytes, 0, bytes.size)
+        write(bytes, 0, bytes.size)
     }
 
     override fun write(bytes: ByteArray?, off: Int, len: Int) {
         bytes!!
-        socket.send(bytes, off, len)
+        var written = 0
+        while (written < len) {
+            val send = socket.send(bytes, off + written, len - written)
+            if(send < 0) {
+                throw Exception()
+            }
+            written += send
+        }
     }
 
-    override fun flush() {
-        super.flush()
-    }
 
     override fun close() {
         socket.close()

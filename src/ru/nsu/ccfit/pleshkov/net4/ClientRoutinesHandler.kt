@@ -96,6 +96,8 @@ class ClientRoutinesHandler : RoutinesHandler {
     private fun timeToClose() = (System.currentTimeMillis() - timeClose) > 2 * TIMEOUT_MS
 
     override fun closeConnection(remote: InetSocketAddress)  {
+        messagesHandler.waitAllSent()
+
         val fin = messagesHandler.currentFinMessage()
         messagesHandler.state = UDPStreamState.FIN_WAIT
         messagesHandler.serviceMessages.put(fin)
@@ -155,6 +157,7 @@ class ClientRoutinesHandler : RoutinesHandler {
             message as? SynAckMessage ?: continue
 
             val ack = messagesHandler.handleSynack(message) ?: continue
+            messagesHandler.state = UDPStreamState.CONNECTED
             while (gotTimeToConnect(timestamp)) {
                 try {
                     sendMessage(ack, remote)
@@ -189,7 +192,10 @@ class ClientRoutinesHandler : RoutinesHandler {
 
     private fun handleData(remote: InetSocketAddress) {
         val dataMessage = messagesHandler.currentDataMessage()
-        dataMessage?.let { sendBlocking(it, remote) }
+        dataMessage?.let {
+            sendBlocking(it, remote)
+            println("Data sent")
+        }
     }
 
 }
