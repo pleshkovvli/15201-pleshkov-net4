@@ -1,9 +1,8 @@
-package ru.nsu.ccfit.pleshkov.net4
+package ru.nsu.ccfit.pleshkov.net4.handlers
 
 import ru.nsu.ccfit.pleshkov.net4.messages.*
-import ru.nsu.ccfit.pleshkov.net4.sockets.RecvRingBuffer
-import ru.nsu.ccfit.pleshkov.net4.sockets.SendRingBuffer
-import java.net.InetSocketAddress
+import ru.nsu.ccfit.pleshkov.net4.buffers.RecvRingBuffer
+import ru.nsu.ccfit.pleshkov.net4.buffers.SendRingBuffer
 import java.util.*
 import java.util.concurrent.ArrayBlockingQueue
 
@@ -89,7 +88,6 @@ class MessagesHandler {
             }
             is AckMessage -> handleAck(message)
             is DataMessage -> {
-                println("Data received")
                 handleDataMessage(message)
             }
             is FinMessage -> handleFin()

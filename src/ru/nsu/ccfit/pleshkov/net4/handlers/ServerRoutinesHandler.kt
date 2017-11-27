@@ -1,6 +1,7 @@
-package ru.nsu.ccfit.pleshkov.net4
+package ru.nsu.ccfit.pleshkov.net4.handlers
 
 import ru.nsu.ccfit.pleshkov.net4.messages.*
+import ru.nsu.ccfit.pleshkov.net4.sockets.UDPStreamSocket
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
@@ -21,7 +22,7 @@ class ServerRoutinesHandler : RoutinesHandler {
 
     private val sendingHandlers = ArrayBlockingQueue<InetSocketAddress>(10)
 
-    private val acceptingQueue = ArrayBlockingQueue<UDPStrSock>(10)
+    private val acceptingQueue = ArrayBlockingQueue<UDPStreamSocket>(10)
 
     fun accept() = acceptingQueue.take()
 
@@ -78,7 +79,7 @@ class ServerRoutinesHandler : RoutinesHandler {
             }
             sendingHandlers.put(remote)
             if(state == UDPStreamState.SYN_ACK_SENT && handler.state == UDPStreamState.CONNECTED) {
-                val newClient = UDPStrSock(this, remote)
+                val newClient = UDPStreamSocket(this, remote)
                 acceptingQueue.add(newClient)
             }
         } else if(state == UDPStreamState.LISTENING) {

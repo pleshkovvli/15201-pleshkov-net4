@@ -1,4 +1,4 @@
-package ru.nsu.ccfit.pleshkov.net4.sockets
+package ru.nsu.ccfit.pleshkov.net4.buffers
 
 open class SynchronizedRingBuffer(protected val maxSize: Int) {
     init {
@@ -84,58 +84,5 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
         if (length < 1) {
             throw IllegalArgumentException("Length should be greater than zero")
         }
-    }
-}
-
-class RecvRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
-    override val notifyOnWrite = true
-    override val waitToRead: Boolean
-        get() = (availableBytes == 0)
-}
-
-class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
-    private var bufOffset = 0
-
-    override var begin = 0
-        set(value) {
-            bufOffset += if (value - field > 0) {
-                value - field
-            } else {
-                (value + maxSize - field) % maxSize
-            }
-
-            field = value
-        }
-
-    override val freeSpace: Int
-        get() = super.freeSpace - bufOffset
-
-    override val waitToWrite: Boolean
-        get() = (freeSpace == 0)
-    override val notifyOnWrite = true
-
-    override val waitToRead: Boolean
-        get() = (availableBytes == 0)
-
-    val allBytesSent: Boolean
-        get() = (availableBytes == 0) && (bufOffset == 0)
-
-
-    fun dropBufferOffset() = synchronized(lock) {
-        val offsetWas = bufOffset
-        begin = (begin + maxSize - bufOffset) % maxSize
-        availableBytes += bufOffset
-        bufOffset = 0
-        lock.notifyAll()
-        offsetWas
-    }
-
-    fun confirmRead(len: Int) = synchronized(lock) {
-        bufOffset -= len
-        if (bufOffset < 0) {
-            bufOffset = 0
-        }
-
-        lock.notifyAll()
     }
 }

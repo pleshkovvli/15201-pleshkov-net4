@@ -1,4 +1,4 @@
-package ru.nsu.ccfit.pleshkov.net4
+package ru.nsu.ccfit.pleshkov.net4.handlers
 
 import ru.nsu.ccfit.pleshkov.net4.messages.Message
 import ru.nsu.ccfit.pleshkov.net4.messages.toPacket

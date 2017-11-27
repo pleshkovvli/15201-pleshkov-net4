@@ -1,9 +1,7 @@
-package ru.nsu.ccfit.pleshkov.net4
+package ru.nsu.ccfit.pleshkov.net4.handlers
 
 import ru.nsu.ccfit.pleshkov.net4.messages.*
-import ru.nsu.ccfit.pleshkov.net4.sockets.*
 import java.net.*
-import java.util.concurrent.ArrayBlockingQueue
 
 const val TIME_TO_CONNECT_MS = 100000
 
@@ -16,8 +14,6 @@ class ClientRoutinesHandler : RoutinesHandler {
 
     private val messagesHandler = MessagesHandler()
     private lateinit var remoteAddress: InetSocketAddress
-
-    //private val serviceMessages = ArrayBlockingQueue<Message>(50)
 
     private val sendingLock = java.lang.Object()
     private var sendRoutineRun: Boolean = false
@@ -194,7 +190,6 @@ class ClientRoutinesHandler : RoutinesHandler {
         val dataMessage = messagesHandler.currentDataMessage()
         dataMessage?.let {
             sendBlocking(it, remote)
-            println("Data sent")
         }
     }
 

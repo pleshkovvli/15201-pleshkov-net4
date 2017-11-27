@@ -1,5 +1,7 @@
 package ru.nsu.ccfit.pleshkov.net4
 
+import ru.nsu.ccfit.pleshkov.net4.sockets.UDPStreamServerSocket
+import ru.nsu.ccfit.pleshkov.net4.sockets.UDPStreamSocket
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -11,7 +13,7 @@ fun main(args: Array<String>) {
     val fileStr = "/home/pleshkovvli/Downloads/tsetup.1.1.23.tar.xz"
 
     thread {
-        val socket = UDPStrSock(InetAddress.getLocalHost(), 3113)
+        val socket = UDPStreamSocket(InetAddress.getLocalHost(), 3113)
 
         socket.getOutputStream().use { outputStream ->
             val file = File(fileStr)
@@ -34,7 +36,7 @@ fun main(args: Array<String>) {
     }
 
 
-    val udpStrServerSock = UDPStrServerSock(3113)
+    val udpStrServerSock = UDPStreamServerSocket(3113)
     udpStrServerSock.listen()
 
     val socket = udpStrServerSock.accept()

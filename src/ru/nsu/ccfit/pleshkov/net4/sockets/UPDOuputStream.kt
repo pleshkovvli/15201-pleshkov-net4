@@ -1,8 +1,8 @@
-package ru.nsu.ccfit.pleshkov.net4
+package ru.nsu.ccfit.pleshkov.net4.sockets
 
 import java.io.OutputStream
 
-class UPDOutputStream(private val socket: UDPStrSock) : OutputStream() {
+class UPDOutputStream(private val socket: UDPStreamSocket) : OutputStream() {
     private val singleByte = ByteArray(1)
 
     override fun write(byte: Int) {

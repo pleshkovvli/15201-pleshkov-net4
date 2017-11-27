@@ -157,11 +157,6 @@ enum class MessageType {
     FIN
 }
 
-
-fun DatagramSocket.sendMessage(message: Message) {
-    send(message.toPacket(remoteSocketAddress))
-}
-
 fun Message.toPacket(address: SocketAddress): DatagramPacket {
     val bytes = this.toBytes()
     return DatagramPacket(bytes, bytes.size, address)

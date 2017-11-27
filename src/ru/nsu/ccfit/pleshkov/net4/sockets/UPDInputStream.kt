@@ -1,9 +1,10 @@
-package ru.nsu.ccfit.pleshkov.net4
+package ru.nsu.ccfit.pleshkov.net4.sockets
 
+import ru.nsu.ccfit.pleshkov.net4.handlers.UDPStreamClosedException
 import java.io.IOException
 import java.io.InputStream
 
-class UPDInputStream(private val socket: UDPStrSock) : InputStream() {
+class UPDInputStream(private val socket: UDPStreamSocket) : InputStream() {
 
     private val singleByte = ByteArray(1)
 
@@ -39,9 +40,7 @@ class UPDInputStream(private val socket: UDPStrSock) : InputStream() {
     }
 
     override fun read(buf: ByteArray?, off: Int, len: Int): Int {
-        if(buf == null) {
-            throw NullPointerException()
-        }
+        buf!!
 
         return try {
             socket.recv(buf, off, len)
