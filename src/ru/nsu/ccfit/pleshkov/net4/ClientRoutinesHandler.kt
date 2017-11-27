@@ -57,6 +57,8 @@ class ClientRoutinesHandler : RoutinesHandler {
         return messagesHandler.recv(buf, offset, length)
     }
 
+    override fun available(remote: InetSocketAddress) = messagesHandler.available
+
     override fun receivingRoutine() {
         messagesHandler.checkResend()
         notifySended()

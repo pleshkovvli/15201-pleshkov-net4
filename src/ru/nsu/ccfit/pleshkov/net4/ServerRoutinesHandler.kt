@@ -7,6 +7,8 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ArrayBlockingQueue
 
+class UDPStreamClosedException : UDPStreamSocketException("Socket closed")
+
 class ServerRoutinesHandler : RoutinesHandler {
 
     constructor(port: Int) {
@@ -89,14 +91,14 @@ class ServerRoutinesHandler : RoutinesHandler {
     private fun timeToClose() = (System.currentTimeMillis() - timeClose) > 2 * TIMEOUT_MS
 
     override fun connect(address: InetSocketAddress) {
-        throw Exception()
+        throw UDPStreamSocketException("Server side socket")
     }
 
     override fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
-        val messagesHandler = messagesHandlers[remote] ?: throw Exception()
+        val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamClosedException()
 
         if(messagesHandler.state != UDPStreamState.CONNECTED) {
-            throw Exception()
+            throw UDPStreamSocketException("NOT CONNECTED")
         }
 
         val sended = messagesHandler.send(buf, offset, length)
@@ -105,7 +107,7 @@ class ServerRoutinesHandler : RoutinesHandler {
     }
 
     override fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
-        val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamSocketException("NO REMOTE")
+        val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamClosedException()
 
         if(messagesHandler.state != UDPStreamState.CONNECTED) {
             throw UDPStreamSocketException("NOT CONNECTED")
@@ -124,6 +126,8 @@ class ServerRoutinesHandler : RoutinesHandler {
         sendingHandlers.add(remote)
 
         messagesHandler.waitTimeAck()
+
+        messagesHandlers.remove(remote)
 
         if(state == UDPStreamState.CLOSED) {
             finish()

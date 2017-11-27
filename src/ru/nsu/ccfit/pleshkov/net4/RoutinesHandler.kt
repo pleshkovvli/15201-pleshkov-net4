@@ -47,6 +47,8 @@ abstract class RoutinesHandler {
 
     abstract fun closeConnection(remote: InetSocketAddress)
 
+    abstract fun available(remote: InetSocketAddress) : Int
+
     open fun finish() {
         timeClose = System.currentTimeMillis()
     }

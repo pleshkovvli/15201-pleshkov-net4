@@ -9,7 +9,8 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
 
     private val buffer = ByteArray(maxSize)
     open protected var begin = 0
-    open protected var availableBytes = 0
+    var availableBytes = 0
+        private set
 
     val dataAvailable
         get() = availableBytes > 0
@@ -42,7 +43,7 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
 
         availableBytes += toWrite
 
-        if(notifyOnWrite) {
+        if (notifyOnWrite) {
             lock.notifyAll()
         }
 
@@ -67,13 +68,12 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
         begin = (toRead + begin) % maxSize
         availableBytes -= toRead
 
-        if(notifyOnRead) {
+        if (notifyOnRead) {
             lock.notifyAll()
         }
 
         return toRead
     }
-
 
 
     private fun validate(offset: Int, length: Int) {
@@ -98,7 +98,7 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
 
     override var begin = 0
         set(value) {
-            bufOffset += if(value - field > 0) {
+            bufOffset += if (value - field > 0) {
                 value - field
             } else {
                 (value + maxSize - field) % maxSize
@@ -131,7 +131,7 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
 
     fun confirmRead(len: Int) = synchronized(lock) {
         bufOffset -= len
-        if(bufOffset < 0) {
+        if (bufOffset < 0) {
             bufOffset = 0
         }
 

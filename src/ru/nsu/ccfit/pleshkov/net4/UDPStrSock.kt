@@ -31,6 +31,8 @@ class UDPStrSock : Closeable {
         return handler.recv(remote, buf, offset, length)
     }
 
+    fun available() = handler.available(remote)
+
     override fun close() {
         handler.closeConnection(remote)
     }

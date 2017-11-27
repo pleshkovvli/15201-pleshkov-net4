@@ -28,6 +28,8 @@ class MessagesHandler {
         get() = (state == UDPStreamState.CONNECTED)
 
     val serviceMessages = ArrayBlockingQueue<Message>(10)
+    val available
+        get() = recvBuffer.availableBytes
 
     fun initSynMessage() = SynMessage(seqNumber)
 
