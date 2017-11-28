@@ -9,32 +9,40 @@ import kotlin.concurrent.thread
 
 const val TIMEOUT_MS = 1000
 
-
 open class UDPStreamSocketException(message: String) : Exception(message)
 
 class UDPStreamSocketTimeoutException(reason: String)
     : UDPStreamSocketException("Time to $reason exceeded")
 
 abstract class RoutinesHandler {
-    private lateinit var recvRoutine: Thread
-    private lateinit var sendRoutine: Thread
+    private val recvRoutine = thread(start = false) {
+        try {
+            while (!Thread.interrupted()) {
+                receivingRoutine()
+            }
+        } catch (e: InterruptedException) {
+        }
+
+        //println("RECV $this FINISH")
+    }
+
+    private val sendRoutine = thread(start = false) {
+        try {
+            while (!Thread.interrupted()) {
+                sendingRoutine()
+            }
+        } catch (e: InterruptedException) {
+        }
+        //println("SEND $this FINISH")
+    }
 
     protected var timeClose: Long = 0
 
     protected abstract val udpSocket: DatagramSocket
 
     open fun start() {
-        sendRoutine = thread {
-            while (!Thread.interrupted()) {
-                sendingRoutine()
-            }
-        }
-
-        recvRoutine = thread {
-            while (!Thread.interrupted()) {
-                receivingRoutine()
-            }
-        }
+        sendRoutine.start()
+        recvRoutine.start()
     }
 
     protected abstract fun sendingRoutine()
@@ -42,12 +50,12 @@ abstract class RoutinesHandler {
 
     abstract fun connect(address: InetSocketAddress)
 
-    abstract fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int) : Int
-    abstract fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int) : Int
+    abstract fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int
+    abstract fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int
 
     abstract fun closeConnection(remote: InetSocketAddress)
 
-    abstract fun available(remote: InetSocketAddress) : Int
+    abstract fun available(remote: InetSocketAddress): Int
 
     open fun finish() {
         timeClose = System.currentTimeMillis()
@@ -55,17 +63,6 @@ abstract class RoutinesHandler {
 
     protected fun sendMessage(message: Message, remote: InetSocketAddress) {
         udpSocket.send(message.toPacket(remote))
-    }
-
-
-    protected fun sendBlocking(message: Message, remote: InetSocketAddress) {
-        while (true) {
-            try {
-                sendMessage(message, remote)
-                break
-            } catch (e: SocketTimeoutException) {
-            }
-        }
     }
 
     protected fun finishThreads() {

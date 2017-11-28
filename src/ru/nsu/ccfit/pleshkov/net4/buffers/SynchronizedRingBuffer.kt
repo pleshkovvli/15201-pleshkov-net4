@@ -7,8 +7,11 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
         }
     }
 
+    var closing = false
+
     private val buffer = ByteArray(maxSize)
-    open protected var begin = 0
+
+    protected open var begin = 0
     var availableBytes = 0
         protected set
 
@@ -18,26 +21,31 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
     open protected val freeSpace
         get() = maxSize - availableBytes
 
-    open protected val waitToWrite = false
-    open protected val notifyOnWrite = false
+    protected open val waitToWrite = false
+    protected open val notifyOnWrite = false
 
-    open protected val waitToRead = false
-    open protected val notifyOnRead = false
+    protected open val waitToRead = false
+    protected open val notifyOnRead = false
 
     protected val lock = Object()
 
     fun write(src: ByteArray, offset: Int, length: Int): Int = synchronized(lock) {
         validate(offset, length)
 
-        while (waitToWrite) {
+        while (waitToWrite && !closing) {
             lock.wait()
+        }
+
+        if (closing) {
+            return 0
         }
 
         val toWrite = minOf(length, freeSpace)
 
         var index = 0
+        val end = begin + availableBytes
         while (index < toWrite) {
-            buffer[(index + begin + availableBytes) % maxSize] = src[offset + index]
+            buffer[(index + end) % maxSize] = src[offset + index]
             ++index
         }
 
@@ -53,8 +61,12 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
     fun read(dest: ByteArray, offset: Int, length: Int): Int = synchronized(lock) {
         validate(offset, length)
 
-        while (waitToRead) {
+        while (waitToRead && !closing) {
             lock.wait()
+        }
+
+        if (closing) {
+            return 0
         }
 
         val toRead = minOf(length, availableBytes)

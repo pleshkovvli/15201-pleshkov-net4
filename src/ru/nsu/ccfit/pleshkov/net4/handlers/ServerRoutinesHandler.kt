@@ -45,15 +45,35 @@ class ServerRoutinesHandler : RoutinesHandler {
     }
 
     override fun receivingRoutine() {
-        messagesHandlers.values.forEach { it.checkResend() }
+        //println("HANDLERS")
+        if (state == UDPStreamState.CLOSED && messagesHandlers.isEmpty()) {
+            finish()
+            finishThreads()
+        }
 
-        val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
-        val packet = DatagramPacket(bytes, bytes.size)
-
-        if(timeClose > 0 && timeToClose()) {
+        if (timeClose > 0 && timeToClose()) {
             finishThreads()
             return
         }
+
+        messagesHandlers.forEach { pair ->
+            //println(pair)
+            val handler = pair.value
+
+            if (handler.closed()) {
+                messagesHandlers.remove(pair.key)
+                handler.closeBuffers()
+                if (messagesHandlers.isEmpty()) {
+                    finish()
+                    finishThreads()
+                }
+            } else {
+                handler.checkResend()
+            }
+        }
+
+        val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
+        val packet = DatagramPacket(bytes, bytes.size)
 
         try {
             udpSocket.receive(packet)
@@ -70,24 +90,35 @@ class ServerRoutinesHandler : RoutinesHandler {
 
         val remote = packet.socketAddress as? InetSocketAddress ?: return
 
+        println(message)
+
         val handler = messagesHandlers[remote]
-        if(handler != null) {
-            val state = handler.state
-            val ack = handler.handleMessage(message)
-            ack?.let {
-                handler.serviceMessages.offer(it)
+        if (handler != null) {
+            val wasConnected = handler.connected
+
+            val sendAck = handler.handleMessage(message)
+            if (sendAck) {
+                sendingHandlers.put(remote)
             }
-            sendingHandlers.put(remote)
-            if(state == UDPStreamState.SYN_ACK_SENT && handler.state == UDPStreamState.CONNECTED) {
+
+            if (!wasConnected && handler.connected) {
                 val newClient = UDPStreamSocket(this, remote)
                 acceptingQueue.add(newClient)
             }
-        } else if(state == UDPStreamState.LISTENING) {
-            val newHandler = MessagesHandler()
-            val ack = newHandler.handleMessage(message)
-            ack?.let { newHandler.serviceMessages.add(it) }
-            messagesHandlers.put(remote, newHandler)
-            sendingHandlers.put(remote)
+        } else {
+            if (state == UDPStreamState.LISTENING) {
+                message as? SynMessage ?: return
+
+                val newHandler = MessagesHandler()
+                messagesHandlers.put(remote, newHandler)
+
+                val sendAck = newHandler.handleMessage(message)
+                if(sendAck) {
+                    sendingHandlers.put(remote)
+                }
+            } else {
+                sendMessage(FinMessage(0,0), remote)
+            }
         }
     }
 
@@ -100,8 +131,8 @@ class ServerRoutinesHandler : RoutinesHandler {
     override fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
         val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamClosedException()
 
-        if(messagesHandler.state != UDPStreamState.CONNECTED) {
-            throw UDPStreamSocketException("NOT CONNECTED")
+        if (!messagesHandler.connected) {
+            throw UDPStreamSocketException("Socket is not connected")
         }
 
         val sended = messagesHandler.send(buf, offset, length)
@@ -112,8 +143,8 @@ class ServerRoutinesHandler : RoutinesHandler {
     override fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
         val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamClosedException()
 
-        if(messagesHandler.state != UDPStreamState.CONNECTED) {
-            throw UDPStreamSocketException("NOT CONNECTED")
+        if (!messagesHandler.connected) {
+            throw UDPStreamSocketException("Socket is not connected")
         }
 
         return messagesHandler.recv(buf, offset, length)
@@ -121,18 +152,15 @@ class ServerRoutinesHandler : RoutinesHandler {
     }
 
     override fun closeConnection(remote: InetSocketAddress) {
-        val messagesHandler = messagesHandlers[remote] ?: return
+        val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamClosedException()
 
-        val fin = messagesHandler.currentFinMessage()
-        messagesHandler.state = UDPStreamState.FIN_WAIT
-        messagesHandler.serviceMessages.put(fin)
-        sendingHandlers.add(remote)
+        if (messagesHandler.state != UDPStreamState.CONNECTED) return
 
-        messagesHandler.waitTimeAck()
+        if (!messagesHandler.fin()) return
 
         messagesHandlers.remove(remote)
 
-        if(state == UDPStreamState.CLOSED) {
+        if (state == UDPStreamState.CLOSED && messagesHandlers.isEmpty()) {
             finish()
             finishThreads()
         }
@@ -140,28 +168,36 @@ class ServerRoutinesHandler : RoutinesHandler {
 
     fun closeServer() {
         state = UDPStreamState.CLOSED
+        if (messagesHandlers.isEmpty()) {
+            finish()
+            finishThreads()
+        }
     }
 
 
     private fun checkFin(remote: InetSocketAddress) {
         val messagesHandler = messagesHandlers[remote] ?: return
 
-        messagesHandler.checkFin()?.let { sendBlocking(it, remote) }
+        messagesHandler.checkFin()?.let { sendMessage(it, remote) }
     }
 
     private fun checkService(remote: InetSocketAddress) {
         val messagesHandler = messagesHandlers[remote] ?: return
 
-        var message: Message? = messagesHandler.serviceMessages.poll()
+        var message: Message? = messagesHandler.currentServiceMessage()
         while (message != null) {
-            sendBlocking(message, remote)
-            message = messagesHandler.serviceMessages.poll()
+            sendMessage(message, remote)
+            message = messagesHandler.currentServiceMessage()
         }
     }
 
     private fun handleData(remote: InetSocketAddress) {
-        val dataMessage = messagesHandlers[remote]?.currentDataMessage()
-        dataMessage?.let { sendBlocking(it, remote) }
+        val messagesHandler = messagesHandlers[remote] ?: return
+        var dataMessage = messagesHandler.currentDataMessage()
+        while (dataMessage != null) {
+            sendMessage(dataMessage, remote)
+            dataMessage = messagesHandler.currentDataMessage()
+        }
     }
 
 }

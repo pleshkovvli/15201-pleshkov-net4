@@ -19,10 +19,13 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
 
     override val waitToWrite: Boolean
         get() = (freeSpace == 0)
+
     override val notifyOnWrite = true
 
     override val waitToRead: Boolean
         get() = (availableBytes == 0)
+
+    override val notifyOnRead = true
 
     val allBytesSent: Boolean
         get() = (availableBytes == 0) && (bufOffset == 0)
@@ -30,10 +33,13 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
 
     fun dropBufferOffset() = synchronized(lock) {
         val offsetWas = bufOffset
+
         begin = (begin + maxSize - bufOffset) % maxSize
         availableBytes += bufOffset
+
         bufOffset = 0
         lock.notifyAll()
+
         offsetWas
     }
 

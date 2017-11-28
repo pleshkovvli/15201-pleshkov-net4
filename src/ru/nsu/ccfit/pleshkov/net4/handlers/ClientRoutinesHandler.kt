@@ -23,9 +23,9 @@ class ClientRoutinesHandler : RoutinesHandler {
     override fun sendingRoutine() {
         waitOnSend()
 
-        checkService(remoteAddress)
-        handleData(remoteAddress)
-        checkFin(remoteAddress)
+        checkService(remoteAddress, messagesHandler)
+        handleData(remoteAddress, messagesHandler)
+        checkFin(remoteAddress, messagesHandler)
     }
 
     private fun waitOnSend() = synchronized(sendingLock) {
@@ -35,8 +35,8 @@ class ClientRoutinesHandler : RoutinesHandler {
         sendRoutineRun = false
     }
 
-    override fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int) : Int {
-        if(messagesHandler.state != UDPStreamState.CONNECTED) {
+    override fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
+        if (messagesHandler.state != UDPStreamState.CONNECTED) {
             throw Exception()
         }
 
@@ -45,8 +45,8 @@ class ClientRoutinesHandler : RoutinesHandler {
         return sended
     }
 
-    override fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int) : Int {
-        if(messagesHandler.state != UDPStreamState.CONNECTED) {
+    override fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
+        if (messagesHandler.state != UDPStreamState.CONNECTED) {
             throw Exception()
         }
 
@@ -65,7 +65,8 @@ class ClientRoutinesHandler : RoutinesHandler {
         try {
             udpSocket.receive(packet)
         } catch (e: SocketTimeoutException) {
-            if(messagesHandler.state == UDPStreamState.TIME_ACK && timeToClose()) {
+            if (messagesHandler.state == UDPStreamState.CLOSED
+                    || messagesHandler.state == UDPStreamState.TIME_ACK && timeToClose()) {
                 finishThreads()
                 try {
                     udpSocket.close()
@@ -81,26 +82,21 @@ class ClientRoutinesHandler : RoutinesHandler {
             return
         }
 
-        val ack = messagesHandler.handleMessage(message)
+        val sendAck = messagesHandler.handleMessage(message)
 
-        val offerSuccess = ack?.let {  messagesHandler.serviceMessages.offer(it) } ?: false
-        if (offerSuccess) {
+        if (sendAck) {
             notifySended()
         }
     }
 
     private fun timeToClose() = (System.currentTimeMillis() - timeClose) > 2 * TIMEOUT_MS
 
-    override fun closeConnection(remote: InetSocketAddress)  {
-        messagesHandler.waitAllSent()
+    override fun closeConnection(remote: InetSocketAddress) {
+        if (messagesHandler.state != UDPStreamState.CONNECTED) return
 
-        val fin = messagesHandler.currentFinMessage()
-        messagesHandler.state = UDPStreamState.FIN_WAIT
-        messagesHandler.serviceMessages.put(fin)
-
-        messagesHandler.waitTimeAck()
-
-        finish()
+        if (messagesHandler.fin()) {
+            finish()
+        }
     }
 
     private fun notifySended() = synchronized(sendingLock) {
@@ -152,20 +148,13 @@ class ClientRoutinesHandler : RoutinesHandler {
 
             message as? SynAckMessage ?: continue
 
-            val ack = messagesHandler.handleSynack(message) ?: continue
-            messagesHandler.state = UDPStreamState.CONNECTED
-            while (gotTimeToConnect(timestamp)) {
-                try {
-                    sendMessage(ack, remote)
-                    break
-                } catch (e: SocketTimeoutException) {
-                    continue
-                }
+            val sendAck = messagesHandler.handleSynack(message)
+            if(sendAck) {
+                sendMessage(messagesHandler.currentAckMessage(), remote)
             }
-
         }
 
-        if (messagesHandler.state != UDPStreamState.CONNECTED) {
+        if (messagesHandler.connected) {
             throw UDPStreamSocketTimeoutException("connect")
         }
     }
@@ -174,23 +163,22 @@ class ClientRoutinesHandler : RoutinesHandler {
         return (System.currentTimeMillis() - timestamp) < TIME_TO_CONNECT_MS
     }
 
-    private fun checkFin(remote: InetSocketAddress)  {
-        messagesHandler.checkFin()?.let { sendBlocking(it, remote) }
+    private fun checkFin(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
+        messagesHandler.checkFin()?.let { sendMessage(it, remote) }
     }
 
-    private fun checkService(remote: InetSocketAddress) {
-        var message: Message? = messagesHandler.serviceMessages.poll()
-        while (message != null) {
-            sendBlocking(message, remote)
-            message = messagesHandler.serviceMessages.poll()
-        }
+    private fun checkService(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
+        do {
+            val message = messagesHandler.currentServiceMessage() ?: break
+            sendMessage(message, remote)
+        } while (true)
     }
 
-    private fun handleData(remote: InetSocketAddress) {
-        val dataMessage = messagesHandler.currentDataMessage()
-        dataMessage?.let {
-            sendBlocking(it, remote)
-        }
+    private fun handleData(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
+        do {
+            val dataMessage = messagesHandler.currentDataMessage() ?: break
+            sendMessage(dataMessage, remote)
+        } while (true)
     }
 
 }
