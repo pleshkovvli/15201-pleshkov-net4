@@ -20,11 +20,14 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
 
     private val acceptingQueue = ArrayBlockingQueue<UDPStreamSocket>(10)
 
-    fun accept() : UDPStreamSocket = acceptingQueue.take()
+    fun accept(): UDPStreamSocket = acceptingQueue.take()
 
     override fun available(remote: InetSocketAddress) = messagesHandlers[remote]?.available ?: -1
 
     private var state: UDPStreamState = UDPStreamState.NOT_CONNECTED
+
+    val closed
+        get() = (state == UDPStreamState.CLOSED)
 
     fun listen() {
         state = UDPStreamState.LISTENING
@@ -63,7 +66,7 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
             return
         }
 
-        println("RECV $message on $this")
+        //println("RECV $message on $this")
 
         val remote = packet.socketAddress as? InetSocketAddress ?: return
         val handler = messagesHandlers[remote]
@@ -87,7 +90,7 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
                     finishThreads()
                 }
             } else {
-                if(handler.checkResend()) {
+                if (handler.checkResend()) {
                     sendingHandlers.put(pair.key)
                 }
             }

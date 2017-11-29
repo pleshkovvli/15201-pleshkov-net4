@@ -3,12 +3,11 @@ package ru.nsu.ccfit.pleshkov.net4.sockets
 import ru.nsu.ccfit.pleshkov.net4.handlers.ServerRoutinesHandler
 import java.io.Closeable
 
-class UDPStreamServerSocket : Closeable {
-    private val handler: ServerRoutinesHandler
+class UDPStreamServerSocket(port: Int) : Closeable {
+    private val handler: ServerRoutinesHandler = ServerRoutinesHandler(port).apply { listen() }
 
-    constructor(port: Int) {
-        handler = ServerRoutinesHandler(port)
-    }
+    val isClosed
+        get() = handler.closed
 
     fun listen() = handler.listen()
 

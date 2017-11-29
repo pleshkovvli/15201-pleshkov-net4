@@ -3,7 +3,7 @@ package ru.nsu.ccfit.pleshkov.net4.handlers
 import ru.nsu.ccfit.pleshkov.net4.messages.*
 import java.net.*
 
-const val TIME_TO_CONNECT_MS = 100000
+const val TIME_TO_CONNECT_MS = 5000
 
 class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
 
@@ -80,7 +80,7 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
             return
         }
 
-        println("RECV: $message on $this")
+        //println("RECV: $message on $this")
 
         val sendAck = messagesHandler.handleMessage(message)
 

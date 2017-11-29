@@ -22,7 +22,7 @@ abstract class RoutinesHandler {
         } catch (e: InterruptedException) {
         }
 
-        println("RECVING ROUTINE on $this FINISHED")
+        //println("RECVING ROUTINE on $this FINISHED")
     }
 
     private val sendRoutine = thread(start = false) {
@@ -32,7 +32,7 @@ abstract class RoutinesHandler {
             }
         } catch (e: InterruptedException) {
         }
-        println("SENDING ROUTINE on $this FINISHED")
+        //println("SENDING ROUTINE on $this FINISHED")
     }
 
     protected var timeClose: Long = 0
@@ -61,7 +61,7 @@ abstract class RoutinesHandler {
     }
 
     protected fun sendMessage(message: Message, remote: InetSocketAddress) {
-        println("SEND: $message on $this")
+        //println("SEND: $message on $this")
         udpSocket.send(message.toPacket(remote))
     }
 

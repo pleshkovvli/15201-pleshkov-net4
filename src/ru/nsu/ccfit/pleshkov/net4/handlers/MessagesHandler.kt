@@ -59,17 +59,17 @@ class MessagesHandler {
             return null
         }
 
-        println("AVAILABLE ${sendBuffer.availableBytes}")
+        //println("AVAILABLE ${sendBuffer.availableBytes}")
 
         val bytes = ByteArray(MAX_PAYLOAD_SIZE)
         val read = sendBuffer.read(bytes, 0, MAX_PAYLOAD_SIZE)
 
-        println("AVAILABLE NOW ${sendBuffer.availableBytes}")
+        //println("AVAILABLE NOW ${sendBuffer.availableBytes}")
 
         val dataMessage = DataMessage(seqNumber, ackNumber, bytes, read)
         seqNumber += read
 
-        println("DATA $read")
+        //println("DATA $read")
 
         stateLock.notifyAll()
 
@@ -154,6 +154,8 @@ class MessagesHandler {
         if (state == UDPStreamState.SYN_ACK_SENT) {
             state = UDPStreamState.CONNECTED
 
+            ++seqNumber
+
             renewAck(message)
 
             stateLock.notifyAll()
@@ -161,7 +163,7 @@ class MessagesHandler {
             return false
         }
 
-        println("ACK ${message.ackNumber} OTHER ACK $otherAck")
+        //println("ACK ${message.ackNumber} OTHER ACK $otherAck")
 
         if (message.ackNumber < otherAck) {
             return false
@@ -180,7 +182,7 @@ class MessagesHandler {
         }
 
         sendBuffer.confirmRead(message.ackNumber - otherAck)
-        println("CONFIRMED ACK ${message.ackNumber - otherAck}")
+        //println("CONFIRMED ACK ${message.ackNumber - otherAck}")
         renewAck(message)
         stateLock.notifyAll()
 
@@ -188,7 +190,7 @@ class MessagesHandler {
     }
 
     private fun handleDataMessage(message: DataMessage): Boolean = synchronized(stateLock) {
-        println("MESSAGE ${message.seqNumber} ACK $ackNumber")
+        //println("MESSAGE ${message.seqNumber} ACK $ackNumber")
 
         if(message.seqNumber < ackNumber) {
             return serviceMessages.offer(currentAckMessage())
