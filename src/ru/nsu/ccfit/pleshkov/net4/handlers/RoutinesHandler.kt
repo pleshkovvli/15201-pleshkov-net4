@@ -4,7 +4,6 @@ import ru.nsu.ccfit.pleshkov.net4.messages.Message
 import ru.nsu.ccfit.pleshkov.net4.messages.toPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
-import java.net.SocketTimeoutException
 import kotlin.concurrent.thread
 
 const val TIMEOUT_MS = 1000
@@ -23,7 +22,7 @@ abstract class RoutinesHandler {
         } catch (e: InterruptedException) {
         }
 
-        //println("RECV $this FINISH")
+        println("RECVING ROUTINE on $this FINISHED")
     }
 
     private val sendRoutine = thread(start = false) {
@@ -33,7 +32,7 @@ abstract class RoutinesHandler {
             }
         } catch (e: InterruptedException) {
         }
-        //println("SEND $this FINISH")
+        println("SENDING ROUTINE on $this FINISHED")
     }
 
     protected var timeClose: Long = 0
@@ -62,7 +61,22 @@ abstract class RoutinesHandler {
     }
 
     protected fun sendMessage(message: Message, remote: InetSocketAddress) {
+        println("SEND: $message on $this")
         udpSocket.send(message.toPacket(remote))
+    }
+
+    protected fun checkServiceMessages(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
+        do {
+            val message = messagesHandler.currentServiceMessage() ?: break
+            sendMessage(message, remote)
+        } while (true)
+    }
+
+    protected fun checkData(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
+        do {
+            val dataMessage = messagesHandler.currentDataMessage() ?: break
+            sendMessage(dataMessage, remote)
+        } while (true)
     }
 
     protected fun finishThreads() {

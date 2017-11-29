@@ -66,7 +66,7 @@ fun main(args: Array<String>) {
                 }
 
                 try {
-                    //inputStream.read()
+                    inputStream.read()
                 } catch (e: UDPStreamClosedException) {
                     print("AA")
                 }

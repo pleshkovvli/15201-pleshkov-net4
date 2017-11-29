@@ -5,10 +5,11 @@ import java.net.*
 
 const val TIME_TO_CONNECT_MS = 100000
 
-class ClientRoutinesHandler : RoutinesHandler {
+class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
 
-    constructor(port: Int? = null) : super() {
-        udpSocket = port?.let { DatagramSocket(port) } ?: DatagramSocket()
+    override val udpSocket = port?.let { DatagramSocket(port) } ?: DatagramSocket()
+
+    init {
         udpSocket.soTimeout = TIMEOUT_MS
     }
 
@@ -18,14 +19,11 @@ class ClientRoutinesHandler : RoutinesHandler {
     private val sendingLock = java.lang.Object()
     private var sendRoutineRun: Boolean = false
 
-    override val udpSocket: DatagramSocket
-
     override fun sendingRoutine() {
         waitOnSend()
 
-        checkService(remoteAddress, messagesHandler)
-        handleData(remoteAddress, messagesHandler)
-        checkFin(remoteAddress, messagesHandler)
+        checkServiceMessages(remoteAddress, messagesHandler)
+        checkData(remoteAddress, messagesHandler)
     }
 
     private fun waitOnSend() = synchronized(sendingLock) {
@@ -56,8 +54,9 @@ class ClientRoutinesHandler : RoutinesHandler {
     override fun available(remote: InetSocketAddress) = messagesHandler.available
 
     override fun receivingRoutine() {
-        messagesHandler.checkResend()
-        notifySended()
+        if(messagesHandler.checkResend()) {
+            notifySended()
+        }
 
         val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
         val packet = DatagramPacket(bytes, bytes.size)
@@ -65,8 +64,7 @@ class ClientRoutinesHandler : RoutinesHandler {
         try {
             udpSocket.receive(packet)
         } catch (e: SocketTimeoutException) {
-            if (messagesHandler.state == UDPStreamState.CLOSED
-                    || messagesHandler.state == UDPStreamState.TIME_ACK && timeToClose()) {
+            if (messagesHandler.closed()) {
                 finishThreads()
                 try {
                     udpSocket.close()
@@ -81,6 +79,8 @@ class ClientRoutinesHandler : RoutinesHandler {
         } catch (e: BadBytesException) {
             return
         }
+
+        println("RECV: $message on $this")
 
         val sendAck = messagesHandler.handleMessage(message)
 
@@ -148,13 +148,13 @@ class ClientRoutinesHandler : RoutinesHandler {
 
             message as? SynAckMessage ?: continue
 
-            val sendAck = messagesHandler.handleSynack(message)
+            val sendAck = messagesHandler.handleMessage(message)
             if(sendAck) {
                 sendMessage(messagesHandler.currentAckMessage(), remote)
             }
         }
 
-        if (messagesHandler.connected) {
+        if (!messagesHandler.connected) {
             throw UDPStreamSocketTimeoutException("connect")
         }
     }
@@ -162,23 +162,4 @@ class ClientRoutinesHandler : RoutinesHandler {
     private fun gotTimeToConnect(timestamp: Long): Boolean {
         return (System.currentTimeMillis() - timestamp) < TIME_TO_CONNECT_MS
     }
-
-    private fun checkFin(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
-        messagesHandler.checkFin()?.let { sendMessage(it, remote) }
-    }
-
-    private fun checkService(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
-        do {
-            val message = messagesHandler.currentServiceMessage() ?: break
-            sendMessage(message, remote)
-        } while (true)
-    }
-
-    private fun handleData(remote: InetSocketAddress, messagesHandler: MessagesHandler) {
-        do {
-            val dataMessage = messagesHandler.currentDataMessage() ?: break
-            sendMessage(dataMessage, remote)
-        } while (true)
-    }
-
 }

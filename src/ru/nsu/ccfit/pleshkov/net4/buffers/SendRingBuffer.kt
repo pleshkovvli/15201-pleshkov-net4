@@ -35,7 +35,7 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
         val offsetWas = bufOffset
 
         begin = (begin + maxSize - bufOffset) % maxSize
-        availableBytes += bufOffset
+        availableBytes += offsetWas
 
         bufOffset = 0
         lock.notifyAll()
