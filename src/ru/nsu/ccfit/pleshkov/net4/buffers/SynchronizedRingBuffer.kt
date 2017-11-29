@@ -35,7 +35,7 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
         validate(offset, length)
 
         while (waitToWrite && !closing) {
-            lock.wait(500)
+            lock.wait(50)
         }
 
         if (closing) {
@@ -64,7 +64,7 @@ open class SynchronizedRingBuffer(protected val maxSize: Int) {
         validate(offset, length)
 
         while (waitToRead && !closing) {
-            lock.wait(500)
+            lock.wait(50)
         }
 
         if (closing) {

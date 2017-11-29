@@ -61,16 +61,25 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
         val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
         val packet = DatagramPacket(bytes, bytes.size)
 
+        if(timeClose > 0 && timeToClose()) {
+            finishThreads()
+            try {
+                udpSocket.close()
+            } catch (e: SocketException) {
+            }
+            return
+        }
+
         try {
             udpSocket.receive(packet)
         } catch (e: SocketTimeoutException) {
-            if (messagesHandler.closed()) {
-                finishThreads()
-                try {
-                    udpSocket.close()
-                } catch (e: SocketException) {
-                }
-            }
+//            if (messagesHandler.closed()) {
+//                finishThreads()
+//                try {
+//                    udpSocket.close()
+//                } catch (e: SocketException) {
+//                }
+//            }
             return
         }
 
@@ -80,7 +89,7 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
             return
         }
 
-        //println("RECV: $message on $this")
+        //println("RECV: $message on")
 
         val sendAck = messagesHandler.handleMessage(message)
 

@@ -7,6 +7,7 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
 
 class UDPStreamClosedException : UDPStreamSocketException("Socket closed")
 
@@ -14,7 +15,7 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
 
     override val udpSocket = DatagramSocket(port).apply { soTimeout = TIMEOUT_MS }
 
-    private val messagesHandlers = HashMap<InetSocketAddress, MessagesHandler>()
+    private val messagesHandlers = ConcurrentHashMap<InetSocketAddress, MessagesHandler>()
 
     private val sendingHandlers = ArrayBlockingQueue<InetSocketAddress>(10)
 
@@ -66,7 +67,7 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
             return
         }
 
-        //println("RECV $message on $this")
+        //println("RECV $message")
 
         val remote = packet.socketAddress as? InetSocketAddress ?: return
         val handler = messagesHandlers[remote]
@@ -85,7 +86,7 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
             if (handler.closed()) {
                 messagesHandlers.remove(pair.key)
                 handler.closeBuffers()
-                if (messagesHandlers.isEmpty()) {
+                if (state == UDPStreamState.CLOSED && messagesHandlers.isEmpty()) {
                     finish()
                     finishThreads()
                 }
@@ -155,7 +156,7 @@ class ServerRoutinesHandler(port: Int) : RoutinesHandler() {
     }
 
     override fun closeConnection(remote: InetSocketAddress) {
-        val messagesHandler = messagesHandlers[remote] ?: throw UDPStreamClosedException()
+        val messagesHandler = messagesHandlers[remote] ?: return
 
         if (messagesHandler.state != UDPStreamState.CONNECTED) {
             return

@@ -163,7 +163,7 @@ class MessagesHandler {
             return false
         }
 
-        //println("ACK ${message.ackNumber} OTHER ACK $otherAck")
+        //println("ACK ${message.ackNumber} OTHER ACK $otherAck SEQ $seqNumber")
 
         if (message.ackNumber < otherAck) {
             return false
@@ -219,6 +219,8 @@ class MessagesHandler {
             UDPStreamState.FIN_WAIT_ACK -> UDPStreamState.TIME_ACK
             else -> state
         }
+
+        ++ackNumber
 
         stateLock.notifyAll()
 

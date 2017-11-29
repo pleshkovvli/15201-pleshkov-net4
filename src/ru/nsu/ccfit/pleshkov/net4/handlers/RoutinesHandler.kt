@@ -61,7 +61,7 @@ abstract class RoutinesHandler {
     }
 
     protected fun sendMessage(message: Message, remote: InetSocketAddress) {
-        //println("SEND: $message on $this")
+        //println("SEND: $message")
         udpSocket.send(message.toPacket(remote))
     }
 
