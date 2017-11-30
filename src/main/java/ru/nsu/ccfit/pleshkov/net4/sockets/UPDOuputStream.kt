@@ -1,5 +1,6 @@
 package ru.nsu.ccfit.pleshkov.net4.sockets
 
+import ru.nsu.ccfit.pleshkov.net4.sockets.UDPStreamSocket
 import java.io.OutputStream
 
 class UPDOutputStream(private val socket: UDPStreamSocket) : OutputStream() {

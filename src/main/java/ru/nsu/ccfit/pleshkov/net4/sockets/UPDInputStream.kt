@@ -1,6 +1,7 @@
 package ru.nsu.ccfit.pleshkov.net4.sockets
 
 import ru.nsu.ccfit.pleshkov.net4.handlers.UDPStreamClosedException
+import ru.nsu.ccfit.pleshkov.net4.sockets.UDPStreamSocket
 import java.io.InputStream
 
 class UPDInputStream(private val socket: UDPStreamSocket) : InputStream() {
