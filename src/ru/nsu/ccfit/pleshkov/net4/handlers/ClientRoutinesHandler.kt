@@ -6,18 +6,57 @@ import java.net.*
 const val TIME_TO_CONNECT_MS = 5000
 
 class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
-
     override val udpSocket = port?.let { DatagramSocket(port) } ?: DatagramSocket()
+
+    private val messagesHandler = MessagesHandler()
+    private val sendingLock = java.lang.Object()
+
+    private var sendRoutineRun: Boolean = false
+
+    private lateinit var remoteAddress: InetSocketAddress
 
     init {
         udpSocket.soTimeout = TIMEOUT_MS
     }
 
-    private val messagesHandler = MessagesHandler()
-    private lateinit var remoteAddress: InetSocketAddress
+    override fun connect(address: InetSocketAddress) {
+        if (!messagesHandler.notConnected) {
+            throw UDPStreamSocketException("Socket already connected")
+        }
 
-    private val sendingLock = java.lang.Object()
-    private var sendRoutineRun: Boolean = false
+        remoteAddress = address
+
+        connectAction(address)
+        start()
+    }
+
+    override fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
+        if (!messagesHandler.connected) {
+            throw UDPStreamNotConnectedException()
+        }
+
+        val sent = messagesHandler.send(buf, offset, length)
+        notifySent()
+        return sent
+    }
+
+    override fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
+        if (!messagesHandler.connected) {
+            throw UDPStreamNotConnectedException()
+        }
+
+        return messagesHandler.recv(buf, offset, length)
+    }
+
+    override fun closeConnection(remote: InetSocketAddress) {
+        if (!messagesHandler.connected) return
+
+        if (messagesHandler.fin()) {
+            finish()
+        }
+    }
+
+    override fun available(remote: InetSocketAddress) = messagesHandler.available
 
     override fun sendingRoutine() {
         waitOnSend()
@@ -26,40 +65,10 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
         checkData(remoteAddress, messagesHandler)
     }
 
-    private fun waitOnSend() = synchronized(sendingLock) {
-        while (!sendRoutineRun) {
-            sendingLock.wait()
-        }
-        sendRoutineRun = false
-    }
-
-    override fun send(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
-        if (messagesHandler.state != UDPStreamState.CONNECTED) {
-            throw Exception()
-        }
-
-        val sended = messagesHandler.send(buf, offset, length)
-        notifySended()
-        return sended
-    }
-
-    override fun recv(remote: InetSocketAddress, buf: ByteArray, offset: Int, length: Int): Int {
-        if (messagesHandler.state != UDPStreamState.CONNECTED) {
-            throw Exception()
-        }
-
-        return messagesHandler.recv(buf, offset, length)
-    }
-
-    override fun available(remote: InetSocketAddress) = messagesHandler.available
-
     override fun receivingRoutine() {
         if(messagesHandler.checkResend()) {
-            notifySended()
+            notifySent()
         }
-
-        val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
-        val packet = DatagramPacket(bytes, bytes.size)
 
         if(timeClose > 0 && timeToClose()) {
             finishThreads()
@@ -70,16 +79,12 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
             return
         }
 
+        val bytes = ByteArray(MESSAGE_BUFFER_SIZE)
+        val packet = DatagramPacket(bytes, bytes.size)
+
         try {
             udpSocket.receive(packet)
         } catch (e: SocketTimeoutException) {
-//            if (messagesHandler.closed()) {
-//                finishThreads()
-//                try {
-//                    udpSocket.close()
-//                } catch (e: SocketException) {
-//                }
-//            }
             return
         }
 
@@ -89,46 +94,29 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
             return
         }
 
-        //println("RECV: $message on")
-
         val sendAck = messagesHandler.handleMessage(message)
 
         if (sendAck) {
-            notifySended()
+            notifySent()
         }
     }
 
     private fun timeToClose() = (System.currentTimeMillis() - timeClose) > 2 * TIMEOUT_MS
 
-    override fun closeConnection(remote: InetSocketAddress) {
-        if (messagesHandler.state != UDPStreamState.CONNECTED) return
-
-        if (messagesHandler.fin()) {
-            finish()
+    private fun waitOnSend() = synchronized(sendingLock) {
+        while (!sendRoutineRun) {
+            sendingLock.wait()
         }
+        sendRoutineRun = false
     }
 
-    private fun notifySended() = synchronized(sendingLock) {
+    private fun notifySent() = synchronized(sendingLock) {
         sendRoutineRun = true
         sendingLock.notifyAll()
     }
 
-
-    override fun connect(address: InetSocketAddress) {
-        if (messagesHandler.state != UDPStreamState.NOT_CONNECTED) {
-            throw UDPStreamSocketException("Socket already connected")
-        }
-
-        remoteAddress = address
-
-        connectAction(address)
-        start()
-    }
-
     private fun connectAction(remote: InetSocketAddress) {
         val timestamp = System.currentTimeMillis()
-
-        //udpSocket.connect(remoteAddress)
 
         val syn = messagesHandler.initSynMessage()
 
@@ -138,7 +126,6 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
         while (gotTimeToConnect(timestamp) && !messagesHandler.connected) {
             try {
                 sendMessage(syn, remote)
-                messagesHandler.state = UDPStreamState.SYN_SENT
             } catch (e: SocketTimeoutException) {
                 continue
             }
@@ -155,12 +142,13 @@ class ClientRoutinesHandler(port: Int? = null) : RoutinesHandler() {
                 continue
             }
 
+            if(message is FinMessage) {
+                throw UDPStreamSocketException("Failed to connect with closing server")
+            }
+
             message as? SynAckMessage ?: continue
 
-            val sendAck = messagesHandler.handleMessage(message)
-            if(sendAck) {
-                sendMessage(messagesHandler.currentAckMessage(), remote)
-            }
+            sendRoutineRun = messagesHandler.handleMessage(message)
         }
 
         if (!messagesHandler.connected) {

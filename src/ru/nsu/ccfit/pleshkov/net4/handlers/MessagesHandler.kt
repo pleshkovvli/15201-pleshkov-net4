@@ -8,54 +8,45 @@ import java.util.concurrent.ArrayBlockingQueue
 
 const val INIT_ACK = -1
 
-class MessagesHandler {
-    private val recvBuffer = RecvRingBuffer(DEFAULT_BUFFER_SIZE)
-    private val sendBuffer = SendRingBuffer(DEFAULT_BUFFER_SIZE)
+class MessagesHandler(
+        recvBufferSize : Int = DEFAULT_BUFFER_SIZE,
+        sendBufferSize: Int = DEFAULT_BUFFER_SIZE
+) {
+    val connected: Boolean
+        get() = (state == UDPStreamState.CONNECTED)
+    val notConnected
+        get() = (state == UDPStreamState.NOT_CONNECTED)
 
-    private var seqNumber: Int = Random().nextInt()
-    private var otherAck: Int = INIT_ACK
-
-    private var ackNumber: Int = INIT_ACK
-
-    private var ackTimeStamp: Long = System.currentTimeMillis()
-
-    internal var state: UDPStreamState = UDPStreamState.NOT_CONNECTED
+    val available
+        get() = recvBuffer.available
 
     private val stateLock = java.lang.Object()
 
-    val connected: Boolean
-        get() = (state == UDPStreamState.CONNECTED)
-
     private val serviceMessages = ArrayBlockingQueue<Message>(50)
-    val available
-        get() = recvBuffer.availableBytes
 
-    fun closeBuffers() {
-        recvBuffer.closing = true
-        sendBuffer.closing = true
-    }
+    private val recvBuffer = RecvRingBuffer(recvBufferSize)
+    private val sendBuffer = SendRingBuffer(sendBufferSize)
 
-    fun closed() = when (state) {
-        UDPStreamState.CLOSED -> true
-        UDPStreamState.TIME_ACK -> timeToClose()
-        else -> false
-    }
+    private var state: UDPStreamState = UDPStreamState.NOT_CONNECTED
 
-    private fun timeToClose(): Boolean {
-        return (System.currentTimeMillis() - ackTimeStamp) > 2 * TIMEOUT_MS
-    }
+    private var seqNumber: Int = Random().nextInt()
+    private var otherAck: Int = INIT_ACK
+    private var ackTimeStamp: Long = System.currentTimeMillis()
 
-    fun initSynMessage() = SynMessage(seqNumber)
-
-    fun currentServiceMessage(): Message? = serviceMessages.poll()
-
-    fun currentAckMessage() = AckMessage(seqNumber, ackNumber)
+    private var ackNumber: Int = INIT_ACK
 
     fun send(buf: ByteArray, offset: Int, length: Int) = sendBuffer.write(buf, offset, length)
     fun recv(buf: ByteArray, offset: Int, length: Int) = recvBuffer.read(buf, offset, length)
 
+    fun initSynMessage(): SynMessage {
+        state = UDPStreamState.SYN_SENT
+        return SynMessage(seqNumber)
+    }
+
+    fun currentServiceMessage(): Message? = serviceMessages.poll()
+
     fun currentDataMessage(): DataMessage? = synchronized(stateLock) {
-        if (!sendBuffer.dataAvailable) {
+        if (sendBuffer.available == 0) {
             return null
         }
 
@@ -76,11 +67,28 @@ class MessagesHandler {
         return dataMessage
     }
 
-    private fun currentFinMessage() = FinMessage(seqNumber, ackNumber)
+    fun handleMessage(message: Message): Boolean = when (message) {
+        is SynMessage -> handleSyn(message)
+        is SynAckMessage -> handleSynack(message)
+        is AckMessage -> handleAck(message)
+        is DataMessage -> handleDataMessage(message)
+        is FinMessage -> handleFin()
+    }
 
+    fun checkResend(): Boolean {
+        if (System.currentTimeMillis() - ackTimeStamp < TIMEOUT_MS) {
+            return false
+        }
+
+        ackTimeStamp = System.currentTimeMillis()
+        val offset = sendBuffer.dropBufferOffset()
+        seqNumber -= offset
+        checkFin()
+        return true
+    }
 
     fun fin(): Boolean = synchronized(stateLock) {
-        while (!allSent()) {
+        while (!sendBuffer.allBytesSent) {
             stateLock.wait()
         }
 
@@ -99,29 +107,15 @@ class MessagesHandler {
         return true
     }
 
-    fun checkFin() = synchronized(stateLock) {
-        if (state == UDPStreamState.FIN_WAIT || state == UDPStreamState.LAST_ACK) {
-            if (System.currentTimeMillis() - ackTimeStamp > TIMEOUT_MS) {
-                ackTimeStamp = System.currentTimeMillis()
-                serviceMessages.offer(FinMessage(seqNumber, ackNumber))
-            }
-        }
-
-        if (state == UDPStreamState.CLOSE_WAIT && allSent()) {
-            state = UDPStreamState.LAST_ACK
-            stateLock.notifyAll()
-            serviceMessages.offer(FinMessage(seqNumber, ackNumber))
-        }
+    fun closeBuffers() {
+        recvBuffer.close()
+        sendBuffer.close()
     }
 
-    private fun allSent() = sendBuffer.allBytesSent
-
-    fun handleMessage(message: Message): Boolean = when (message) {
-        is SynMessage -> handleSyn(message)
-        is SynAckMessage -> handleSynack(message)
-        is AckMessage -> handleAck(message)
-        is DataMessage -> handleDataMessage(message)
-        is FinMessage -> handleFin()
+    fun closed() = when (state) {
+        UDPStreamState.CLOSED -> true
+        UDPStreamState.TIME_ACK -> timeToClose()
+        else -> false
     }
 
     private fun handleSyn(message: SynMessage): Boolean {
@@ -192,7 +186,7 @@ class MessagesHandler {
     private fun handleDataMessage(message: DataMessage): Boolean = synchronized(stateLock) {
         //println("MESSAGE ${message.seqNumber} ACK $ackNumber")
 
-        if(message.seqNumber < ackNumber) {
+        if (message.seqNumber < ackNumber) {
             return serviceMessages.offer(currentAckMessage())
         }
 
@@ -227,20 +221,28 @@ class MessagesHandler {
         return serviceMessages.offer(currentAckMessage())
     }
 
-    fun checkResend() : Boolean {
-        if (System.currentTimeMillis() - ackTimeStamp > TIMEOUT_MS) {
-            ackTimeStamp = System.currentTimeMillis()
-            val offset = sendBuffer.dropBufferOffset()
-            seqNumber -= offset
-            checkFin()
-            return true
+
+    private fun checkFin() = synchronized(stateLock) {
+        if (state == UDPStreamState.FIN_WAIT || state == UDPStreamState.LAST_ACK) {
+            serviceMessages.offer(currentFinMessage())
         }
 
-        return false
+        if (state == UDPStreamState.CLOSE_WAIT && sendBuffer.allBytesSent) {
+            state = UDPStreamState.LAST_ACK
+            stateLock.notifyAll()
+            serviceMessages.offer(currentFinMessage())
+        }
     }
+
+    private fun currentAckMessage() = AckMessage(seqNumber, ackNumber)
+    private fun currentFinMessage() = FinMessage(seqNumber, ackNumber)
 
     private fun renewAck(message: Message) {
         otherAck = message.ackNumber
         ackTimeStamp = System.currentTimeMillis()
+    }
+
+    private fun timeToClose(): Boolean {
+        return (System.currentTimeMillis() - ackTimeStamp) > 4 * TIMEOUT_MS
     }
 }

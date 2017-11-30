@@ -10,11 +10,11 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 
 class UDPStreamSocket : Closeable {
-    private val handler: RoutinesHandler
-    private var remote: InetSocketAddress? = null
-
     val inetAddress: InetAddress?
         get() = remote?.address
+
+    private val handler: RoutinesHandler
+    private var remote: InetSocketAddress? = null
 
     constructor() {
         handler = ClientRoutinesHandler()
@@ -28,6 +28,13 @@ class UDPStreamSocket : Closeable {
     constructor(address: InetAddress, port: Int) {
         handler = ClientRoutinesHandler()
         connect(InetSocketAddress(address, port))
+    }
+
+    override fun close() {
+        letRemote {
+            handler.closeConnection(it)
+            0
+        }
     }
 
     fun getOutputStream(): OutputStream = UPDOutputStream(this)
@@ -47,13 +54,6 @@ class UDPStreamSocket : Closeable {
     }
 
     fun available() = letRemote { handler.available(it) }
-
-    override fun close() {
-        letRemote {
-            handler.closeConnection(it)
-            0
-        }
-    }
 
     private fun letRemote(block: (InetSocketAddress) -> Int) = remote?.let {
         block(it)

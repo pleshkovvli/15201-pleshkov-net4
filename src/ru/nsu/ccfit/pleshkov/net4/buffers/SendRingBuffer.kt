@@ -1,7 +1,6 @@
 package ru.nsu.ccfit.pleshkov.net4.buffers
 
 class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
-    private var bufOffset = 0
 
     override var begin = 0
         set(value) {
@@ -30,6 +29,7 @@ class SendRingBuffer(maxSize: Int) : SynchronizedRingBuffer(maxSize) {
     val allBytesSent: Boolean
         get() = (availableBytes == 0) && (bufOffset == 0)
 
+    private var bufOffset = 0
 
     fun dropBufferOffset() = synchronized(lock) {
         val offsetWas = bufOffset
